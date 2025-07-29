@@ -1,0 +1,15 @@
+# Bỏ qua model nặng
+weights/
+
+# Bỏ qua ảnh sinh ra khi chạy
+static/preview/
+static/results/
+static/unroll/
+temp/
+
+# VS Code, Python, system files
+__pycache__/
+*.log
+*.pyc
+.env
+*.sqlite
