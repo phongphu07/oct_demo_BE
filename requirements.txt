@@ -8,3 +8,4 @@ python-multipart==0.0.20
 scikit-image==0.24.0
 matplotlib==3.8.3
 tqdm==4.67.1
+gdown
