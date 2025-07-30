@@ -7,7 +7,7 @@ from ultralytics import YOLO
 
 class YoloSegmentor:
     def __init__(self):
-        self.model = YOLO("/home/lab/son/project/backend/weights/20250430_segment_200epoch_yolov8n_best.pt")
+        self.model = YOLO("./weights/20250430_segment_200epoch_yolov8n_best.pt")
 
     def predict(self, file_bytes: bytes, filename: str):
         is_tif = filename.lower().endswith((".tif", ".tiff"))

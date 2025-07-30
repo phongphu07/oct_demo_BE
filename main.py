@@ -73,7 +73,19 @@ def download_all_weights():
         "1W-iF-4qMFGPXOAF2FvvBZZ1OATPNepg2",
         "weights/train_250524_yolov8m_500epoch_imgsz1024.pt"
     )
-    
+    download_from_gdrive(
+        "1DSqJUfaH9WBwEudZ7kQZimSaBduh_i9w",
+        "weights/240403_calcium_2022_30epoch_best.pt"
+    )
+    download_from_gdrive(
+        "1wkyFYa_jYd0doyFpID1Loewar93mdcbU",
+        "weights/eel_2093img_100epoch.pt"
+    )
+    download_from_gdrive(
+        "1UEn_ILA6N_RlAl5LmmzYBQNO56_mC5Vr",
+        "weights/train_240611_eel_keypoint_new_LUT.pt"
+    )
+
 download_all_weights()
 detection = YoloDetection()
 segmentor = YoloSegmentor()

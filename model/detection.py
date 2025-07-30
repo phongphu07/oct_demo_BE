@@ -11,7 +11,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 class YoloDetection:
-    def __init__(self, model_path='/home/lab/son/project/backend/weights/train_250524_yolov8m_500epoch_imgsz1024.pt'):
+    def __init__(self, model_path='./weights/train_250524_yolov8m_500epoch_imgsz1024.pt'):
         self.model = YOLO(model_path)
 
     def predict_single_image(self, file: bytes, filename: str, output_path: str):
