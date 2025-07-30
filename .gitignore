@@ -6,6 +6,7 @@ static/preview/
 static/results/
 static/unroll/
 temp/
+images/
 
 # VS Code, Python, system files
 __pycache__/

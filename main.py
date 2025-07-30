@@ -17,7 +17,6 @@ from model.segmention import YoloSegmentor
 from model.detection import YoloDetection
 from model.angioFFR import AngioFFR
 from PIL import Image, ImageSequence
-import gdown
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -35,14 +34,16 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-
 def download_from_gdrive(file_id: str, dest_path: str):
     if os.path.exists(dest_path):
         print(f"Model already exists: {dest_path}")
         return
-    url = f"https://drive.google.com/uc?id={file_id}"
-    print(f"Downloading model from: {url}")
-    gdown.download(url, dest_path, quiet=False)
+    print(f"Downloading model to {dest_path}...")
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    response = requests.get(url)
+    with open(dest_path, "wb") as f:
+        f.write(response.content)
+    print("Download complete.")
 
 def download_all_weights():
     os.makedirs("weights", exist_ok=True)
@@ -199,11 +200,35 @@ async def predict_by_model(
             return JSONResponse(status_code=400, content={"error": "Missing or invalid task for model1"})
 
     # ===================== MODEL 2 - Segment calcium =====================
+    # elif model == "model2":
+    #     segmentor = YoloSegmentor_Calcium()
+    #     result = segmentor.predict(content, file.filename)
+
+    #     if result["type"] == "tif":
+    #         return JSONResponse(content={
+    #             "is_tif": True,
+    #             "model": model,
+    #             "task": "segmentation",
+    #             "frames": result["frames"],  # mỗi frame có frame_index, url, summary, boxes,...
+    #             "frame_count": result["frame_count"]
+    #         })
+    #     else:
+    #         frame = result["frames"][0]
+    #         return JSONResponse(content={
+    #             "is_tif": False,
+    #             "model": model,
+    #             "task": "segmentation",
+    #             "image_url": frame["url"],
+    #             "image_size": result.get("image_size", {}),
+    #             "summary": frame["summary"],
+    #             "boxes": frame["boxes"],
+    #             "class_distribution": {},
+    #             "vessel_type": "calcium"
+    #         })
     elif model == "model2":
         if task == "predict":
             if segmentor2 is None:
-                return JSONResponse(status_code=500, content={"error": "YoloSegmentor_Calcium model not loaded"})
-
+                return JSONResponse(status_code=500, content={"error": "Model segmentor2 not loaded"})
             result = segmentor2.predict(content, file.filename)
 
             if result["type"] == "tif":
@@ -230,8 +255,7 @@ async def predict_by_model(
 
         elif task == "segment":
             if detector2 is None:
-                return JSONResponse(status_code=500, content={"error": "YoloDetection_EEL model not loaded"})
-
+                return JSONResponse(status_code=500, content={"error": "Model detector2 not loaded"})
             result = detector2.predict(content, file.filename)
 
             if result["type"] == "tif":
@@ -260,10 +284,10 @@ async def predict_by_model(
             return JSONResponse(status_code=400, content={"error": "Missing or invalid task for model2"})
 
 
-    # ===================== MODEL 3 =====================
+    # ===================== MODEL 3 - Giữ nguyên =====================
     elif model == "model3":
         if angioffr is None:
-            return JSONResponse(status_code=500, content={"error": "AngioFFR model not loaded"})
+            return JSONResponse(status_code=500, content={"error": "Model angioffr not loaded"})
 
         if ext in [".tif", ".tiff"]:
             result = angioffr.predict_tif_file(content, file.filename, results_dir)
@@ -302,4 +326,3 @@ async def predict_by_model(
                 },
                 "vessel_type": result["vessel_type"]
             })
-
