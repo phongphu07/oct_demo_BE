@@ -10,14 +10,13 @@ from fastapi import FastAPI, Form, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import requests 
+import requests
 from model.detection_eel import YoloDetection_EEL
 from model.segment_calcium import YoloSegmentor_Calcium
 from model.segmention import YoloSegmentor
 from model.detection import YoloDetection
 from model.angioFFR import AngioFFR
 from PIL import Image, ImageSequence
-
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -27,7 +26,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173","https://oct-demo.vercel.app"],
+    allow_origins=["http://localhost:5173", "https://oct-demo.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,52 +43,59 @@ def download_from_gdrive(file_id: str, dest_path: str):
     response = requests.get(url)
     with open(dest_path, "wb") as f:
         f.write(response.content)
-    print("✅ Download complete.")
+    print("Download complete.")
 
 def download_all_weights():
     os.makedirs("weights", exist_ok=True)
-
-    download_from_gdrive(
-        "1CEtx836c2tUbCCpdZHrnq5jonaG1yr-1",
-        "weights/241003_yolov8x_lca_dropout05_best.pt"
-    )
-    download_from_gdrive(
-        "1w-QQF2R_YJppd0nwFSbz_O3rqnjr7rGq",
-        "weights/241003_yolov8x_rca_dropout05_best.pt"
-    )
-    download_from_gdrive(
-        "1ONgna1eyvSTLgiXp3ULLwmo0anoNwBnf",
-        "weights/20250430_segment_200epoch_yolov8n_best.pt"
-    )
-    download_from_gdrive(
-        "1S1M0BHn9V-p16F3jyAfPuR4_OjEeWIln",
-        "weights/cls_400epoch_50patience_best.pt"
-    )
-    download_from_gdrive(
-        "1fKW0nslRwnadJ5mM8N1sQGwyjjtscY44",
-        "weights/train_250414_yolov8n_300epoch_imgsz1024.pt"
-    )
-    download_from_gdrive(
-        "1W-iF-4qMFGPXOAF2FvvBZZ1OATPNepg2",
-        "weights/train_250524_yolov8m_500epoch_imgsz1024.pt"
-    )
-    download_from_gdrive(
-        "1DSqJUfaH9WBwEudZ7kQZimSaBduh_i9w",
-        "weights/240403_calcium_2022_30epoch_best.pt"
-    )
-    download_from_gdrive(
-        "1wkyFYa_jYd0doyFpID1Loewar93mdcbU",
-        "weights/eel_2093img_100epoch.pt"
-    )
-    download_from_gdrive(
-        "1UEn_ILA6N_RlAl5LmmzYBQNO56_mC5Vr",
-        "weights/train_240611_eel_keypoint_new_LUT.pt"
-    )
+    download_from_gdrive("1CEtx836c2tUbCCpdZHrnq5jonaG1yr-1", "weights/241003_yolov8x_lca_dropout05_best.pt")
+    download_from_gdrive("1w-QQF2R_YJppd0nwFSbz_O3rqnjr7rGq", "weights/241003_yolov8x_rca_dropout05_best.pt")
+    download_from_gdrive("1ONgna1eyvSTLgiXp3ULLwmo0anoNwBnf", "weights/20250430_segment_200epoch_yolov8n_best.pt")
+    download_from_gdrive("1S1M0BHn9V-p16F3jyAfPuR4_OjEeWIln", "weights/cls_400epoch_50patience_best.pt")
+    download_from_gdrive("1fKW0nslRwnadJ5mM8N1sQGwyjjtscY44", "weights/train_250414_yolov8n_300epoch_imgsz1024.pt")
+    download_from_gdrive("1W-iF-4qMFGPXOAF2FvvBZZ1OATPNepg2", "weights/train_250524_yolov8m_500epoch_imgsz1024.pt")
+    download_from_gdrive("1DSqJUfaH9WBwEudZ7kQZimSaBduh_i9w", "weights/240403_calcium_2022_30epoch_best.pt")
+    download_from_gdrive("1wkyFYa_jYd0doyFpID1Loewar93mdcbU", "weights/eel_2093img_100epoch.pt")
+    download_from_gdrive("1UEn_ILA6N_RlAl5LmmzYBQNO56_mC5Vr", "weights/train_240611_eel_keypoint_new_LUT.pt")
 
 download_all_weights()
-detection = YoloDetection()
-segmentor = YoloSegmentor()
-angioffr = AngioFFR()
+
+print("\nInitializing models...")
+
+try:
+    detection = YoloDetection()
+    print("YoloDetection loaded")
+except Exception as e:
+    print(f"Failed to load YoloDetection: {e}")
+    detection = None
+
+try:
+    segmentor = YoloSegmentor()
+    print("YoloSegmentor loaded")
+except Exception as e:
+    print(f"Failed to load YoloSegmentor: {e}")
+    segmentor = None
+
+try:
+    angioffr = AngioFFR()
+    print("AngioFFR loaded")
+except Exception as e:
+    print(f"Failed to load AngioFFR: {e}")
+    angioffr = None
+
+try:
+    segmentor2 = YoloSegmentor_Calcium()
+    print("YoloSegmentor_Calcium loaded")
+except Exception as e:
+    print(f"Failed to load YoloSegmentor_Calcium: {e}")
+    segmentor2 = None
+
+try:
+    detector2 = YoloDetection_EEL()
+    print("YoloDetection_EEL loaded")
+except Exception as e:
+    print(f"Failed to load YoloDetection_EEL: {e}")
+    detector2 = None
+
 # === API ===
     
 @app.post("/uploadImage")
@@ -277,6 +283,7 @@ async def predict_by_model(
 
     # ===================== MODEL 3 - Giữ nguyên =====================
     elif model == "model3":
+        angioffr = AngioFFR()
         if ext in [".tif", ".tiff"]:
             result = angioffr.predict_tif_file(content, file.filename, results_dir)
             return JSONResponse(content={
