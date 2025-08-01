@@ -3,6 +3,7 @@ import os
 import cv2
 import numpy as np
 from PIL import Image, ImageSequence
+import time
 from ultralytics import YOLO
 
 class YoloSegmentor:
@@ -32,6 +33,8 @@ class YoloSegmentor:
         results = []
 
         for idx, page in frames:
+            start_time = time.time()
+
             gray_img = page.convert("L")
             results_yolo = self.model.predict(gray_img, imgsz=1024, conf=0.1, show_labels=False, show_boxes=False)
             boxes_raw = results_yolo[0].boxes.data.cpu().numpy() if results_yolo[0].boxes is not None else []
@@ -44,24 +47,30 @@ class YoloSegmentor:
             relative_path = os.path.relpath(out_path, "static")
 
             box_info = []
+            label_counts = {}
+
             for box in boxes_raw:
                 x1, y1, x2, y2, conf, cls = box
+                label = self.model.names[int(cls)]
                 box_info.append({
-                    "label": self.model.names[int(cls)],
+                    "label": label,
                     "confidence": round(float(conf), 2),
                     "box": [round(x1), round(y1), round(x2), round(y2)]
                 })
-            label_counts = {}
-
-            for b in box_info:
-                label = b["label"]
                 label_counts[label] = label_counts.get(label, 0) + 1
 
-            summary_parts = []
-            for label in ["lumen", "side_branch"]: 
-                if label in label_counts:
-                    summary_parts.append(f"{label_counts[label]} {label}")
-            summary = ", ".join(summary_parts)
+            summary_lines = []
+            for label in ["lumen", "side_branch"]:
+                count = label_counts.get(label, 0)
+                if count > 0:
+                    summary_lines.append(f"✓ Detected: {count} {label}")
+                else:
+                    summary_lines.append(f"✓ No {label} detected")
+
+            elapsed = time.time() - start_time
+            summary_lines.append(f"✓ Frame: {idx + 1}/{len(frames)}")
+            summary_lines.append(f"✓ Processing time: {elapsed:.2f}s")
+            summary = "\n".join(summary_lines)
 
             results.append({
                 "frame_index": idx,
@@ -78,7 +87,10 @@ class YoloSegmentor:
         }
 
 
+
     def predict_single_image(self, file_bytes: bytes, filename: str, output_dir: str = "static/results") -> dict:
+        start_time = time.time()
+
         image = Image.open(BytesIO(file_bytes))
         os.makedirs(output_dir, exist_ok=True)
 
@@ -96,24 +108,29 @@ class YoloSegmentor:
         width, height = image.size
 
         box_info = []
+        label_counts = {}
+
         for box in boxes_raw:
             x1, y1, x2, y2, conf, cls = box
+            label = self.model.names[int(cls)]
             box_info.append({
-                "label": self.model.names[int(cls)],
+                "label": label,
                 "confidence": round(float(conf), 2),
                 "box": [round(x1), round(y1), round(x2), round(y2)]
             })
-        label_counts = {}
-
-        for b in box_info:
-            label = b["label"]
             label_counts[label] = label_counts.get(label, 0) + 1
 
-        summary_parts = []
-        for label in ["lumen", "side_branch"]: 
-            if label in label_counts:
-                summary_parts.append(f"{label_counts[label]} {label}")
-        summary = ", ".join(summary_parts)
+        summary_lines = []
+        for label in ["lumen", "side_branch"]:
+            count = label_counts.get(label, 0)
+            if count > 0:
+                summary_lines.append(f"✓ Detected: {count} {label}")
+            else:
+                summary_lines.append(f"✓ No {label} detected")
+
+        elapsed = time.time() - start_time
+        summary_lines.append(f"✓ Processing time: {elapsed:.2f}s")
+        summary = "\n".join(summary_lines)
 
         return {
             "type": "image",
@@ -130,6 +147,7 @@ class YoloSegmentor:
                 "boxes": box_info
             }]
         }
+
 
     def textAndContour_segment(self, img_path, results):
         img_convert = img_path.convert('RGB')

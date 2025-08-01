@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from io import BytesIO
+import time
 from ultralytics import YOLO
 
 class YoloSegmentor_Calcium:
@@ -31,19 +32,33 @@ class YoloSegmentor_Calcium:
         results = []
 
         for idx, page in frames:
+            start_time = time.time()  
+
             gray_img = page.convert("L")
             results_yolo = self.model.predict(gray_img, imgsz=1024, conf=0.1, show_labels=False, show_boxes=False)
             annotated = self.textAndContour_segment_calcium(page, results_yolo)
             num_calcium = len(results_yolo[0].masks) if results_yolo[0].masks is not None else 0
+
             out_filename = f"{os.path.splitext(filename)[0]}_frame_{idx}.jpg"
             out_path = os.path.join(self.output_dir, out_filename)
             cv2.imwrite(out_path, annotated)
             relative_path = os.path.relpath(out_path, "static")
 
+            summary_lines = []
+            if num_calcium > 0:
+                summary_lines.append(f"✓ Detected: {num_calcium} calcium regions")
+            else:
+                summary_lines.append("✓ No calcium regions detected")
+
+            elapsed = time.time() - start_time
+            summary_lines.append(f"✓ Frame: {idx + 1}/{len(frames)}")
+            summary_lines.append(f"✓ Processing time: {elapsed:.2f}s")
+            summary = "\n".join(summary_lines)
+
             results.append({
                 "frame_index": idx,
                 "url": f"/static/{relative_path}",
-                "summary": f"{num_calcium} calcium regions detected",
+                "summary": summary,
                 "num_boxes": 0,
                 "boxes": []
             })
@@ -54,18 +69,32 @@ class YoloSegmentor_Calcium:
             "frames": results
         }
 
+
     def predict_single_image(self, file_bytes: bytes, filename: str) -> dict:
+        start_time = time.time()
+
         image = Image.open(BytesIO(file_bytes))
         gray_img = image.convert("L")
         results_yolo = self.model.predict(gray_img, imgsz=1024, conf=0.1, show_labels=False, show_boxes=False)
         annotated = self.textAndContour_segment_calcium(image, results_yolo)
         num_calcium = len(results_yolo[0].masks) if results_yolo[0].masks is not None else 0
+
         out_filename = f"{os.path.splitext(filename)[0]}.jpg"
         out_path = os.path.join(self.output_dir, out_filename)
         cv2.imwrite(out_path, annotated)
         relative_path = os.path.relpath(out_path, "static")
 
         width, height = image.size
+
+        summary_lines = []
+        if num_calcium > 0:
+            summary_lines.append(f"✓ Detected: {num_calcium} calcium regions")
+        else:
+            summary_lines.append("✓ No calcium regions detected")
+
+        elapsed = time.time() - start_time
+        summary_lines.append(f"✓ Processing time: {elapsed:.2f}s")
+        summary = "\n".join(summary_lines)
 
         return {
             "type": "image",
@@ -77,11 +106,12 @@ class YoloSegmentor_Calcium:
             "frames": [{
                 "frame_index": 0,
                 "url": f"/static/{relative_path}",
-                "summary": f"{num_calcium} calcium regions detected",
+                "summary": summary,
                 "num_boxes": 0,
                 "boxes": []
             }]
         }
+
 
     def textAndContour_segment_calcium(self, img_path, results):
         img_convert = img_path.convert('RGB')

@@ -4,6 +4,7 @@ from ultralytics import YOLO
 from PIL import Image, ImageSequence
 import os
 import numpy as np
+import time
 from operator import add, mul
 
 class YoloDetection_EEL:
@@ -21,6 +22,7 @@ class YoloDetection_EEL:
         results = []
 
         for j, page in enumerate(frames):
+            start_time = time.time() 
             results_segment = self.model.predict(page, imgsz=1024, conf=0.5, show_labels=False, show_boxes=False)
             annotated_segment = self.textAndContour_segment_calcium(page, results_segment)
 
@@ -36,10 +38,20 @@ class YoloDetection_EEL:
 
             num_eel = len(results_segment[0].masks) if results_segment[0].masks is not None else 0
 
+            summary_lines = []
+            if num_eel > 0:
+                summary_lines.append(f"✓ Detected: {num_eel} EEL regions")
+            else:
+                summary_lines.append("✓ No EEL regions detected")
+
+            elapsed = time.time() - start_time
+            summary_lines.append(f"✓ Processing time: {elapsed:.2f}s")
+            summary = "\n".join(summary_lines)
+
             results.append({
                 "frame_index": j,
                 "url": f"/static/{relative_path}",
-                "summary": f"{num_eel} EEL regions detected",
+                "summary": summary,
                 "boxes": [],
                 "class_distribution": {}
             })

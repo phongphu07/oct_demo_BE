@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 import os
 from PIL import Image, ImageSequence
+from sympy import content
 from ultralytics import YOLO
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -14,8 +15,19 @@ class YoloDetection:
     def __init__(self, model_path='./weights/train_250524_yolov8m_500epoch_imgsz1024.pt'):
         self.model = YOLO(model_path)
 
-    def predict_single_image(self, file: bytes, filename: str, output_path: str):
+    def predict_single_image(
+        self, 
+        file: bytes, 
+        filename: str, 
+        output_path: str,
+        frame_idx: int = None, 
+        total_frames: int = None
+    ):
+        import time
+        start_time = time.time()
+
         img_pil = Image.open(io.BytesIO(file)).convert("RGB")
+        # img_pil = Image.open(io.BytesIO(content)).convert("RGB")
         width, height = img_pil.size
 
         image_np = np.array(img_pil)
@@ -40,9 +52,22 @@ class YoloDetection:
             })
             class_counts[cls_id] += 1
 
-        # Mapping từ class ID sang tên
-        class_names = self.model.names  # e.g., {0: 'guide_wire', 1: 'stent'}
-        summary = [f"{class_counts[i]} {class_names[i]}" for i in class_counts]
+        class_names = self.model.names 
+
+        summary_lines = []
+
+        for class_id, class_name in class_names.items():
+            count = class_counts.get(class_id, 0)
+            if count > 0:
+                summary_lines.append(f"✓ Detected: {count} {class_name}")
+            else:
+                summary_lines.append(f"✓ No {class_name} detected")
+
+        if frame_idx is not None and total_frames is not None:
+            summary_lines.append(f"✓ Frame: {frame_idx + 1}/{total_frames}")
+
+        elapsed = time.time() - start_time
+        summary_lines.append(f"✓ Processing time: {elapsed:.2f}s")
 
         return {
             "output_path": output_path,
@@ -51,25 +76,23 @@ class YoloDetection:
                 "width": width,
                 "height": height
             },
-            "summary": ", ".join(summary), 
+            "summary": "\n".join(summary_lines),
             "num_boxes": len(boxes_info)
         }
+
     
     def predict_tif_file(self, file: bytes, filename: str, output_dir: str = "static/results") -> list[dict]:
         os.makedirs(output_dir, exist_ok=True)
 
-        # Mở ảnh TIF
         image = Image.open(io.BytesIO(file))
-
-        # Lưu tất cả các frame ra RAM để xử lý song song
         frames = []
+
         for i, frame in enumerate(ImageSequence.Iterator(image)):
             if i >= 20:
                 break
             frame_rgb = frame.convert("RGB")
             frames.append((i, frame_rgb))
 
-        # Hàm xử lý từng frame (sẽ chạy song song)
         def process_frame(i_and_frame):
             i, frame_rgb = i_and_frame
 
@@ -80,7 +103,13 @@ class YoloDetection:
             frame_filename = f"{os.path.splitext(filename)[0]}_frame_{i}.png"
             output_path = os.path.join(output_dir, frame_filename)
 
-            result = self.predict_single_image(frame_bytes.getvalue(), frame_filename, output_path)
+            result = self.predict_single_image(
+                frame_bytes.getvalue(),
+                frame_filename,
+                output_path,
+                frame_idx=i,
+                total_frames=len(frames)
+            )
 
             relative_path = os.path.relpath(output_path, STATIC_DIR)
             return {
@@ -94,9 +123,7 @@ class YoloDetection:
             results = list(executor.map(process_frame, frames))
 
         results.sort(key=lambda x: x["frame_index"])
-
         return results
-
     
     def text_and_contour(self, image_bgr, results, width, height):
         dh, dw, _ = image_bgr.shape

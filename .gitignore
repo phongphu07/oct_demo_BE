@@ -1,12 +1,12 @@
-# Bỏ qua model nặng
+
 weights/
 
-# Bỏ qua ảnh sinh ra khi chạy
 static/preview/
 static/results/
 static/unroll/
 temp/
 images/
+example_image/
 
 # VS Code, Python, system files
 __pycache__/
@@ -14,3 +14,5 @@ __pycache__/
 *.pyc
 .env
 *.sqlite
+
+start_ngrok.sh

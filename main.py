@@ -1,22 +1,29 @@
 from concurrent.futures import ThreadPoolExecutor
 import io
 import os
+import shutil
+import tempfile
 import time
 from uuid import uuid4
 import uuid
 import numpy as np
+from custom_static import CustomStaticFiles
 import cv2
+import uuid
+import pydicom   
 from fastapi import FastAPI, Form, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import requests
+from sklearn import pipeline
 from model.detection_eel import YoloDetection_EEL
 from model.segment_calcium import YoloSegmentor_Calcium
 from model.segmention import YoloSegmentor
 from model.detection import YoloDetection
-from model.angioFFR import AngioFFR
+from model.angioFFR import  CombinedPipeline
 from PIL import Image, ImageSequence
+from feedback import router as feedback_router
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -32,8 +39,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+    
+app.include_router(feedback_router)
+app.mount("/static", CustomStaticFiles(directory=STATIC_DIR), name="static")
+# app.mount("/static", StaticFiles(directory="app/static"), name="static")
 def download_from_gdrive(file_id: str, dest_path: str):
     if os.path.exists(dest_path):
         print(f"Model already exists: {dest_path}")
@@ -45,81 +55,67 @@ def download_from_gdrive(file_id: str, dest_path: str):
         f.write(response.content)
     print("Download complete.")
 
-def download_all_weights():
-    os.makedirs("weights", exist_ok=True)
-    download_from_gdrive("1CEtx836c2tUbCCpdZHrnq5jonaG1yr-1", "weights/241003_yolov8x_lca_dropout05_best.pt")
-    download_from_gdrive("1w-QQF2R_YJppd0nwFSbz_O3rqnjr7rGq", "weights/241003_yolov8x_rca_dropout05_best.pt")
-    download_from_gdrive("1ONgna1eyvSTLgiXp3ULLwmo0anoNwBnf", "weights/20250430_segment_200epoch_yolov8n_best.pt")
-    download_from_gdrive("1S1M0BHn9V-p16F3jyAfPuR4_OjEeWIln", "weights/cls_400epoch_50patience_best.pt")
-    download_from_gdrive("1fKW0nslRwnadJ5mM8N1sQGwyjjtscY44", "weights/train_250414_yolov8n_300epoch_imgsz1024.pt")
-    download_from_gdrive("1W-iF-4qMFGPXOAF2FvvBZZ1OATPNepg2", "weights/train_250524_yolov8m_500epoch_imgsz1024.pt")
-    download_from_gdrive("1DSqJUfaH9WBwEudZ7kQZimSaBduh_i9w", "weights/240403_calcium_2022_30epoch_best.pt")
-    download_from_gdrive("1wkyFYa_jYd0doyFpID1Loewar93mdcbU", "weights/eel_2093img_100epoch.pt")
-    download_from_gdrive("1UEn_ILA6N_RlAl5LmmzYBQNO56_mC5Vr", "weights/train_240611_eel_keypoint_new_LUT.pt")
 
-download_all_weights()
+detection = YoloDetection()
+segmentor = YoloSegmentor()
+segmentor2 = YoloSegmentor_Calcium()
+detector2 = YoloDetection_EEL()
+pipeline = CombinedPipeline()
 
-print("\nInitializing models...")
-
-try:
-    detection = YoloDetection()
-    print("YoloDetection loaded")
-except Exception as e:
-    print(f"Failed to load YoloDetection: {e}")
-    detection = None
-
-try:
-    segmentor = YoloSegmentor()
-    print("YoloSegmentor loaded")
-except Exception as e:
-    print(f"Failed to load YoloSegmentor: {e}")
-    segmentor = None
-
-try:
-    angioffr = AngioFFR()
-    print("AngioFFR loaded")
-except Exception as e:
-    print(f"Failed to load AngioFFR: {e}")
-    angioffr = None
-
-try:
-    segmentor2 = YoloSegmentor_Calcium()
-    print("YoloSegmentor_Calcium loaded")
-except Exception as e:
-    print(f"Failed to load YoloSegmentor_Calcium: {e}")
-    segmentor2 = None
-
-try:
-    detector2 = YoloDetection_EEL()
-    print("YoloDetection_EEL loaded")
-except Exception as e:
-    print(f"Failed to load YoloDetection_EEL: {e}")
-    detector2 = None
-
+STATIC_RESULT_DIR = os.path.join("output")
+EXCEL_TEMPLATE_PATH = os.path.join("example_image", "model3", "FFR_Input_Format.xlsx")
+os.makedirs(STATIC_RESULT_DIR, exist_ok=True)
 # === API ===
-    
+
 @app.post("/uploadImage")
 async def upload_image(file: UploadFile):
     temp_id = uuid.uuid4().hex
-    ext = os.path.splitext(file.filename)[1]
-    tif_path = f"/tmp/{temp_id}{ext}"
+    ext = os.path.splitext(file.filename)[1].lower()
+    raw_path = f"/tmp/{temp_id}{ext}"
 
-    with open(tif_path, "wb") as f:
+    with open(raw_path, "wb") as f:
         f.write(await file.read())
 
-    im = Image.open(tif_path)
-    frames = []
-    i = 0
-    while True:
-        try:
-            im.seek(i)
-            frames.append((i, im.copy()))
-            i += 1
-        except EOFError:
-            break
-
-    preview_dir = "static/preview"
+    preview_dir = os.path.join("static", "preview")
     os.makedirs(preview_dir, exist_ok=True)
+
+    frames = []
+
+    if ext == ".dcm":
+        ds = pydicom.dcmread(raw_path)
+        arr = ds.pixel_array 
+        
+        arr = np.squeeze(arr)
+
+        if arr.ndim == 3:
+            for i in range(arr.shape[0]):
+                frame = arr[i]
+                if frame.dtype != np.uint8:
+                    frame = (frame / frame.max() * 255).astype(np.uint8)
+                image = Image.fromarray(frame).convert("RGB")
+                frames.append((i, image))
+        elif arr.ndim == 2:
+            if arr.dtype != np.uint8:
+                arr = (arr / arr.max() * 255).astype(np.uint8)
+            image = Image.fromarray(arr).convert("RGB")
+            frames = [(0, image)]
+        else:
+            raise ValueError(f"Unsupported DICOM shape: {arr.shape}")
+
+
+    elif ext in [".tif", ".tiff"]:
+        im = Image.open(raw_path)
+        i = 0
+        while True:
+            try:
+                im.seek(i)
+                frames.append((i, im.copy()))
+                i += 1
+            except EOFError:
+                break
+    else:
+        im = Image.open(raw_path).convert("RGB")
+        frames = [(0, im)]
 
     def save_frame(frame_info):
         i, frame = frame_info
@@ -130,16 +126,140 @@ async def upload_image(file: UploadFile):
     with ThreadPoolExecutor(max_workers=8) as executor:
         frame_paths = list(executor.map(save_frame, frames))
 
+    try:
+        strip_images = [np.array(f[1].convert("RGB")) for f in frames]
+        merged_strip = np.hstack(strip_images)
+    except Exception as e:
+        print("Failed to merge strip:", e)
+        merged_strip = np.array(frames[0][1].convert("RGB")) 
+
+    merged_strip_path = os.path.join(preview_dir, f"{temp_id}_strip.png")
+    cv2.imwrite(merged_strip_path, cv2.cvtColor(merged_strip, cv2.COLOR_RGB2BGR))
+
     return {
         "image_urls": frame_paths,
+        "unrolled_url": f"/static/preview/{temp_id}_strip.png",
         "temp_filename": f"{temp_id}{ext}"
     }
+
+# @app.post("/predict_angio")
+# async def predict_angio(dicom_file: UploadFile = File(...)):
+#     try:
+#         ext = os.path.splitext(dicom_file.filename)[1].lower()
+
+#         with tempfile.TemporaryDirectory() as tmpdir:
+#             file_path = os.path.join(tmpdir, dicom_file.filename)
+#             output_dir = os.path.join(tmpdir, "output")
+#             os.makedirs(output_dir, exist_ok=True)
+
+#             # Lưu file đầu vào
+#             with open(file_path, "wb") as f:
+#                 shutil.copyfileobj(dicom_file.file, f)
+
+#             # === DICOM ===
+#             if ext == ".dcm":
+#                 result = pipeline.predict(dicom_path=file_path, output_dir=output_dir)
+#                 image_path = os.path.join(output_dir, "best_segmented_frame.png")
+#             else:
+#                 # === Ảnh thông thường ===
+#                 result = pipeline.predict_image(image_path=file_path, output_dir=output_dir)
+#                 image_path = os.path.join(output_dir, "predicted_image.png")
+
+#             # Kiểm tra ảnh đầu ra
+#             if not os.path.exists(image_path):
+#                 return JSONResponse(status_code=500, content={"error": "Predicted image not found."})
+
+#             # Chuyển vào thư mục static để frontend truy cập
+#             static_result_dir = os.path.join(STATIC_DIR, "results")
+#             os.makedirs(static_result_dir, exist_ok=True)
+#             final_path = os.path.join(static_result_dir, f"{uuid4().hex}.png")
+#             shutil.copy(image_path, final_path)
+
+#             img = cv2.imread(final_path)
+#             height, width = img.shape[:2]
+
+#             return JSONResponse(content={
+#                 "is_tif": ext in [".tif", ".tiff"],
+#                 "model": "model3",
+#                 "task": "segment",
+#                 "image_url": f"/static/results/{os.path.basename(final_path)}",
+#                 "image_size": {"width": width, "height": height},
+#                 "summary": f"Detected {len(result['lesions'])} lesion(s): " + ", ".join(result['lesions']),
+#                 "boxes": result.get("boxes", []),
+#                 "class_distribution": result.get("class_distribution", {}),
+#                 "vessel_type": result.get("vessel_type", "eel"),
+#                 "ffr_prediction": result.get("prediction")
+#             })
+
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()
+#         return JSONResponse(status_code=500, content={"error": str(e)})
+
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(os.path.join(STATIC_DIR, "results"), exist_ok=True)
+
+@app.post("/predict_angio")
+async def predict_angio(dicom_file: UploadFile = File(...)):
+    try:
+        ext = os.path.splitext(dicom_file.filename)[1].lower()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, dicom_file.filename)
+            output_dir = os.path.join(tmpdir, "output")
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Lưu file đầu vào
+            with open(file_path, "wb") as f:
+                shutil.copyfileobj(dicom_file.file, f)
+
+            # === Gọi pipeline ===
+            if ext == ".dcm":
+                result = pipeline.predict(dicom_path=file_path, excel_path='example_image/model3/FFR_Regression_Test_F213_RCA1.xlsx', output_dir=output_dir)
+                segmented_path = os.path.join(output_dir, "best_segmented_frame.png")
+                lesion_path = os.path.join(output_dir, "lesion_detection_result.png")
+            else:
+                result = pipeline.predict_image(image_path=file_path, output_dir=output_dir)
+                segmented_path = os.path.join(output_dir, "predicted_image.png")
+                lesion_path = segmented_path  # same for regular images
+
+            # Kiểm tra ảnh đầu ra
+            if not os.path.exists(lesion_path):
+                return JSONResponse(status_code=500, content={"error": "Prediction image not found."})
+
+            # Chuyển ảnh sang thư mục static để frontend đọc
+            static_result_dir = os.path.join(STATIC_DIR, "results")
+            final_image_name = f"{uuid.uuid4().hex}.png"
+            final_path = os.path.join(static_result_dir, final_image_name)
+            shutil.copy(lesion_path, final_path)
+
+            # Lấy kích thước ảnh
+            img = cv2.imread(final_path)
+            height, width = img.shape[:2]
+
+            return JSONResponse(content={
+                "is_tif": ext in [".tif", ".tiff"],
+                "model": "model3",
+                "task": "segment",
+                "image_url": f"/static/results/{final_image_name}",
+                "image_size": {"width": width, "height": height},
+                "summary": f"Detected {len(result['lesions'])} lesion(s): " + ", ".join(result['lesions']),
+                "boxes": result.get("boxes", []),  # Ensure this is returned from your pipeline
+                "class_distribution": result.get("class_distribution", {}),
+                "vessel_type": result.get("vessel_type", "eel"),
+                "ffr_prediction": result.get("prediction")
+            })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/predict")
 async def predict_by_model(
     file: UploadFile = File(...),
     model: str = Form(...),
-    task: str = Form(None)  # chỉ dùng khi model1
+    task: str = Form(None) 
 ):
     content = await file.read()
     ext = os.path.splitext(file.filename)[1].lower()
@@ -200,31 +320,6 @@ async def predict_by_model(
             return JSONResponse(status_code=400, content={"error": "Missing or invalid task for model1"})
 
     # ===================== MODEL 2 - Segment calcium =====================
-    # elif model == "model2":
-    #     segmentor = YoloSegmentor_Calcium()
-    #     result = segmentor.predict(content, file.filename)
-
-    #     if result["type"] == "tif":
-    #         return JSONResponse(content={
-    #             "is_tif": True,
-    #             "model": model,
-    #             "task": "segmentation",
-    #             "frames": result["frames"],  # mỗi frame có frame_index, url, summary, boxes,...
-    #             "frame_count": result["frame_count"]
-    #         })
-    #     else:
-    #         frame = result["frames"][0]
-    #         return JSONResponse(content={
-    #             "is_tif": False,
-    #             "model": model,
-    #             "task": "segmentation",
-    #             "image_url": frame["url"],
-    #             "image_size": result.get("image_size", {}),
-    #             "summary": frame["summary"],
-    #             "boxes": frame["boxes"],
-    #             "class_distribution": {},
-    #             "vessel_type": "calcium"
-    #         })
     elif model == "model2":
         if task == "predict":
             if segmentor2 is None:
@@ -279,50 +374,61 @@ async def predict_by_model(
                     "class_distribution": {},
                     "vessel_type": "eel"
                 })
+    elif model == "model3":
+        try:
+            ext = os.path.splitext(file.filename)[1].lower()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                file_path = os.path.join(tmpdir, file.filename)
+                output_dir = os.path.join(tmpdir, "output")
+                os.makedirs(output_dir, exist_ok=True)
+
+                # Lưu file đầu vào
+                with open(file_path, "wb") as f:
+                    f.write(content)
+
+                if ext == ".dcm":
+                    # Gọi đúng hàm 3 tham số
+                    result = pipeline.process_dicom_and_predict(
+                        dicom_file=file_path,
+                        excel_file=EXCEL_TEMPLATE_PATH,
+                        output_path=output_dir
+                    )
+                    image_path = os.path.join(output_dir, "lesion_detection_result.png")
+                else:
+                    result = pipeline.predict_image(image_path=file_path, output_dir=output_dir)
+                    image_path = os.path.join(output_dir, "predicted_image.png")
+
+                if not os.path.exists(image_path):
+                    return JSONResponse(status_code=500, content={"error": "Predicted image not found."})
+
+                static_result_dir = os.path.join(STATIC_DIR, "results")
+                os.makedirs(static_result_dir, exist_ok=True)
+                final_path = os.path.join(static_result_dir, f"{uuid4().hex}.png")
+                shutil.copy(image_path, final_path)
+
+                img = cv2.imread(final_path)
+                height, width = img.shape[:2]
+
+                return JSONResponse(content={
+                    "is_tif": ext in [".tif", ".tiff"],
+                    "model": "model3",
+                    "task": "segment",
+                    "image_url": f"/static/results/{os.path.basename(final_path)}",
+                    "image_size": {"width": width, "height": height},
+                    "summary": f"Detected classes: {', '.join([f'{k}: {v}' for k, v in result.get('class_distribution', {}).items()])}\nProcessing time: {result.get('processing_time', '')}",
+                    "boxes": result.get("boxes", []),
+                    "class_distribution": result.get("class_distribution", {}),
+                    "vessel_type": result.get("vessel_type", "eel"),
+                    "ffr_prediction": result.get("prediction")
+                })
+
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
 
         else:
             return JSONResponse(status_code=400, content={"error": "Missing or invalid task for model2"})
 
-
-    # ===================== MODEL 3 - Giữ nguyên =====================
-    elif model == "model3":
-        if angioffr is None:
-            return JSONResponse(status_code=500, content={"error": "Model angioffr not loaded"})
-
-        if ext in [".tif", ".tiff"]:
-            result = angioffr.predict_tif_file(content, file.filename, results_dir)
-            return JSONResponse(content={
-                "is_tif": True,
-                "model": model,
-                "task": "segmentation",
-                "frame_count": result["frame_count"],
-                "frames": result["frames"]
-            })
-        else:
-            result = angioffr.predict(content, file.filename)
-            output_img_path = os.path.join(BASE_DIR, result["output_path"].lstrip("/"))
-            img = cv2.imread(output_img_path)
-            height, width = img.shape[:2]
-
-            boxes_info = result.get("boxes_info", [])
-            class_count = result.get("class_distribution", {})
-
-            summary = (
-                ", ".join(f"{k}: {v}" for k, v in class_count.items())
-                if isinstance(class_count, dict) and class_count else "Không có"
-            )
-
-            return JSONResponse(content={
-                "is_tif": False,
-                "model": model,
-                "task": "segmentation",
-                "image_url": result["output_path"],
-                "boxes": boxes_info,
-                "summary": summary,
-                "class_distribution": class_count,
-                "image_size": {
-                    "width": width,
-                    "height": height
-                },
-                "vessel_type": result["vessel_type"]
-            })

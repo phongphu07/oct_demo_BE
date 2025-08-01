@@ -9,3 +9,6 @@ scikit-image==0.24.0
 matplotlib==3.8.3
 tqdm==4.67.1
 gdown
+pydicom
+fastapi_mail
+scikit-learn
